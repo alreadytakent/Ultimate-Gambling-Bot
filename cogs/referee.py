@@ -34,6 +34,12 @@ def has_referee_or_mod_role():
     return check(predicate)
 
 
+def _is_referee_or_mod(member: discord.Member) -> bool:
+    """Return True if member holds the Referee or Mod role."""
+    role_names = {r.name for r in member.roles}
+    return config.REFEREE_ROLE_NAME in role_names or config.MOD_ROLE_NAME in role_names
+
+
 async def _resolve_game_name(guild_id: int, raw: str) -> tuple[str | None, bool, str]:
     """
     Resolve a raw game name string against the guild's registered game list.
@@ -72,6 +78,251 @@ def _parse_result(result: str) -> tuple[str | None, str | None, bool, str | None
         return None, None, False, "❌ Invalid result. Must be `1-0`, `0-1`, or `draw`."
 
 
+# ════════════════════════════════════════════════════════════
+#  MUTUAL CONFIRMATION VIEW  (for non-referee .verify)
+# ════════════════════════════════════════════════════════════
+
+class MutualVerifyView(discord.ui.View):
+    """
+    Shown when a regular player uses .verify.
+    Both named players must click Confirm for the result to be recorded.
+    Either player can click Deny to cancel.
+    """
+
+    def __init__(
+        self,
+        player1: discord.Member,
+        player2: discord.Member,
+        *,
+        ctx: commands.Context,
+        winner: discord.Member | None,
+        loser: discord.Member | None,
+        is_draw: bool,
+        game_name: str,
+        can_draw: bool,
+        bet: int,
+        timeout: float = 120.0,
+    ):
+        super().__init__(timeout=timeout)
+        self.player1    = player1
+        self.player2    = player2
+        self.ctx        = ctx
+        self.winner     = winner
+        self.loser      = loser
+        self.is_draw    = is_draw
+        self.game_name  = game_name
+        self.can_draw   = can_draw
+        self.bet        = bet
+        self.confirmed: set[int] = set()
+        self.message: discord.Message | None = None
+
+    def _required_ids(self) -> set[int]:
+        return {self.player1.id, self.player2.id}
+
+    def _status(self) -> str:
+        lines = []
+        for p in (self.player1, self.player2):
+            tick = "✅" if p.id in self.confirmed else "⬜"
+            lines.append(f"{tick} {p.mention}")
+        return "\n".join(lines)
+
+    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id not in self._required_ids():
+            await interaction.response.send_message(
+                "❌ Only the two players involved can confirm this result.", ephemeral=True
+            )
+            return
+        if interaction.user.id in self.confirmed:
+            await interaction.response.send_message(
+                "You've already confirmed.", ephemeral=True
+            )
+            return
+
+        self.confirmed.add(interaction.user.id)
+
+        if self.confirmed >= self._required_ids():
+            # Both confirmed — record the result
+            self.stop()
+            await _record_verified_result(
+                ctx=self.ctx,
+                winner=self.winner,
+                loser=self.loser,
+                is_draw=self.is_draw,
+                game_name=self.game_name,
+                can_draw=self.can_draw,
+                bet=self.bet,
+                player1=self.player1,
+                player2=self.player2,
+                verified_by_referee=False,
+            )
+            settings = await db.get_guild_settings(self.ctx.guild.id)
+            emoji = settings["currency_emoji"]
+            embed = _build_result_embed(
+                self.winner, self.loser, self.is_draw, self.game_name, self.bet, emoji,
+                footer="Verified by both players"
+            )
+            await interaction.response.edit_message(embed=embed, view=None)
+        else:
+            # One confirmed, waiting for the other
+            embed = interaction.message.embeds[0] if interaction.message.embeds else discord.Embed()
+            embed.set_field_at(
+                0,
+                name="Confirmations",
+                value=self._status(),
+                inline=False,
+            )
+            embed.set_footer(text="Waiting for the other player to confirm…")
+            await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Deny", style=discord.ButtonStyle.danger)
+    async def deny(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id not in self._required_ids():
+            await interaction.response.send_message(
+                "❌ Only the two players involved can deny this result.", ephemeral=True
+            )
+            return
+        self.stop()
+        embed = discord.Embed(
+            title="❌ Result Denied",
+            description=f"{interaction.user.mention} denied the result. Nothing was recorded.",
+            color=discord.Color.red(),
+        )
+        await interaction.response.edit_message(embed=embed, view=None)
+
+    async def on_timeout(self):
+        if self.message:
+            try:
+                embed = discord.Embed(
+                    title="⏰ Verification Timed Out",
+                    description="Both players did not confirm in time. Nothing was recorded.",
+                    color=discord.Color.dark_orange(),
+                )
+                await self.message.edit(embed=embed, view=None)
+            except Exception:
+                pass
+
+
+# ════════════════════════════════════════════════════════════
+#  SHARED RESULT HELPERS
+# ════════════════════════════════════════════════════════════
+
+def _build_result_embed(
+    winner: discord.Member | None,
+    loser: discord.Member | None,
+    is_draw: bool,
+    game_name: str,
+    bet: int,
+    emoji: str,
+    *,
+    footer: str = "",
+) -> discord.Embed:
+    if is_draw:
+        embed = discord.Embed(
+            title=f"Draw Recorded — {game_name}",
+            color=discord.Color.light_grey(),
+        )
+        if winner is None and loser is None:
+            pass  # players shown via field set by caller
+    else:
+        embed = discord.Embed(
+            title=f"Result Verified — {game_name}",
+            color=discord.Color.green(),
+        )
+        if winner:
+            embed.add_field(name="Winner", value=winner.mention, inline=True)
+        if loser:
+            embed.add_field(name="Loser",  value=loser.mention,  inline=True)
+    if bet > 0:
+        label = "Bet (refunded)" if is_draw else "Bet"
+        embed.add_field(name=label, value=fmt_currency(bet, emoji), inline=False)
+    if footer:
+        embed.set_footer(text=footer)
+    return embed
+
+
+async def _record_verified_result(
+    *,
+    ctx: commands.Context,
+    winner: discord.Member | None,
+    loser: discord.Member | None,
+    is_draw: bool,
+    game_name: str,
+    can_draw: bool,
+    bet: int,
+    player1: discord.Member,
+    player2: discord.Member,
+    verified_by_referee: bool,
+) -> None:
+    """
+    Core logic: deduct/pay bets, write DB row, fire class bonuses.
+    Does NOT send any Discord messages — callers handle that.
+    """
+    settings = await db.get_guild_settings(ctx.guild.id)
+    season   = settings["current_season"]
+
+    if is_draw:
+        await db.record_result(
+            game_name=game_name,
+            player1_id=player1.id,
+            player2_id=player2.id,
+            winner_id=None,
+            is_draw=True,
+            guild_id=ctx.guild.id,
+            season_number=season,
+            bet_amount=bet,
+            verified_by_referee=verified_by_referee,
+        )
+        return
+
+    # Win/loss
+    if bet > 0 and winner and loser:
+        await db.update_balance(loser.id,   ctx.guild.id, -bet)
+        await db.update_balance(winner.id,  ctx.guild.id,  bet)
+
+    await db.record_result(
+        game_name=game_name,
+        player1_id=winner.id if winner else player1.id,
+        player2_id=loser.id  if loser  else player2.id,
+        winner_id=winner.id if winner else None,
+        is_draw=False,
+        guild_id=ctx.guild.id,
+        season_number=season,
+        bet_amount=bet,
+        verified_by_referee=verified_by_referee,
+    )
+
+    classes_cog = ctx.bot.get_cog("Classes")
+    bonuses: dict[int, int] = {}
+    if classes_cog and winner and loser:
+        bonuses = await classes_cog.on_game_end(
+            guild=ctx.guild,
+            winner_id=winner.id,
+            loser_id=loser.id,
+            game_name=game_name,
+            bet_amount=bet,
+            is_draw=False,
+        )
+
+    if bonuses:
+        emoji    = settings["currency_emoji"]
+        name_p   = settings["currency_name_plural"]
+        name_s   = settings["currency_name"]
+        lines = []
+        for uid, amount in bonuses.items():
+            member = ctx.guild.get_member(uid)
+            name   = member.mention if member else f"<@{uid}>"
+            lines.append(
+                f"✨ {name} earned a class bonus of "
+                f"{fmt_currency(amount, emoji)}!"
+            )
+        await ctx.send("\n".join(lines))
+
+
+# ════════════════════════════════════════════════════════════
+#  COG
+# ════════════════════════════════════════════════════════════
+
 class Referee(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -79,7 +330,6 @@ class Referee(commands.Cog):
     # ── .verify ──────────────────────────────────────────────
 
     @commands.command(name="verify")
-    @has_referee_or_mod_role()
     async def verify(
             self,
             ctx: commands.Context,
@@ -91,10 +341,11 @@ class Referee(commands.Cog):
             raw_bet: str = "0",
     ):
         """
-        Record a manually verified game result.
+        Record a game result.
+        • Referee/Mod: recorded immediately.
+        • Regular player: both players must confirm via buttons.
         Usage: .verify @player1 vs @player2 {result} {game_name} [bet]
-        Result must be: 1-0, 0-1, or draw
-        Use .verify without args or check .add-game for accepted game aliases.
+        Result: 1-0, 0-1, or draw
         """
         if vs.lower() != "vs":
             await ctx.send("❌ Invalid format. Use: `.verify @player1 vs @player2 {result} {game_name} [bet]`")
@@ -116,124 +367,110 @@ class Referee(commands.Cog):
             return
 
         settings = await db.get_guild_settings(ctx.guild.id)
-        season = settings["current_season"]
-        emoji = settings["currency_emoji"]
+        emoji    = settings["currency_emoji"]
 
-        # ── Draw path ─────────────────────────────────────────
-        if is_draw:
-            # Hard block: draws are not possible in this game
-            if not game_can_draw:
-                await ctx.send(
-                    f"❌ **{game_name_resolved}** cannot end in a draw. "
-                    f"Use `1-0` or `0-1` to record the result."
-                )
-                return
-
-            p1_player = await db.get_player(player1.id, ctx.guild.id)
-            p2_player = await db.get_player(player2.id, ctx.guild.id)
-
-            if p1_player is None:
-                await ctx.send(f"❌ {player1.mention} hasn't joined the season.")
-                return
-            if p2_player is None:
-                await ctx.send(f"❌ {player2.mention} hasn't joined the season.")
-                return
-            if player1 == player2:
-                await ctx.send("❌ Players can't be the same.")
-                return
-
-            await db.record_result(
-                game_name=game_name_resolved,
-                player1_id=player1.id,
-                player2_id=player2.id,
-                winner_id=None,
-                is_draw=True,
-                guild_id=ctx.guild.id,
-                season_number=season,
-                bet_amount=bet,
-                verified_by_referee=True,
+        # ── Shared validation (all callers) ───────────────────
+        if is_draw and not game_can_draw:
+            await ctx.send(
+                f"❌ **{game_name_resolved}** cannot end in a draw. "
+                f"Use `1-0` or `0-1` to record the result."
             )
-
-            embed = discord.Embed(
-                title=f"Draw Recorded — {game_name_resolved}",
-                color=discord.Color.light_grey(),
-            )
-            embed.add_field(name="Players", value=f"{player1.mention} vs {player2.mention}", inline=False)
-            if bet > 0:
-                embed.add_field(name="Bet (refunded)", value=fmt_currency(bet, emoji), inline=False)
-            embed.set_footer(text=f"Verified by {ctx.author.display_name}")
-            await ctx.send(embed=embed)
             return
 
-        # ── Win/loss path ─────────────────────────────────────
-        winner = player1 if winner_role == "first" else player2
-        loser  = player2 if winner_role == "first" else player1
+        winner = player1 if winner_role == "first" else (player2 if winner_role == "second" else None)
+        loser  = player2 if winner_role == "first" else (player1 if winner_role == "second" else None)
 
-        winner_player = await db.get_player(winner.id, ctx.guild.id)
-        loser_player  = await db.get_player(loser.id,  ctx.guild.id)
+        # Player existence checks
+        for p in (player1, player2):
+            rec = await db.get_player(p.id, ctx.guild.id)
+            if rec is None:
+                await ctx.send(f"❌ {p.mention} hasn't joined the season.")
+                return
 
-        if winner_player is None:
-            await ctx.send(f"❌ {winner.mention} hasn't joined the season.")
-            return
-        if loser_player is None:
-            await ctx.send(f"❌ {loser.mention} hasn't joined the season.")
-            return
-        if winner.id == loser.id:
-            await ctx.send("❌ Winner and loser can't be the same player.")
+        if player1 == player2:
+            await ctx.send("❌ Players can't be the same.")
             return
 
-        if bet > 0:
-            if loser_player["balance"] < bet:
+        if not is_draw and bet > 0 and loser:
+            loser_rec = await db.get_player(loser.id, ctx.guild.id)
+            if loser_rec["balance"] < bet:
                 await ctx.send(
                     f"❌ {loser.mention} doesn't have enough to cover the bet of "
                     f"{fmt_currency(bet, emoji)}."
                 )
                 return
-            await db.update_balance(loser.id,   ctx.guild.id, -bet)
-            await db.update_balance(winner.id,  ctx.guild.id,  bet)
 
-        await db.record_result(
-            game_name=game_name_resolved,
-            player1_id=winner.id,
-            player2_id=loser.id,
-            winner_id=winner.id,
-            is_draw=False,
-            guild_id=ctx.guild.id,
-            season_number=season,
-            bet_amount=bet,
-            verified_by_referee=True,
-        )
-
-        classes_cog = self.bot.get_cog("Classes")
-        bonuses = {}
-        if classes_cog:
-            bonuses = await classes_cog.on_game_end(
-                guild=ctx.guild,
-                winner_id=winner.id,
-                loser_id=loser.id,
+        # ── Referee / Mod path — immediate ───────────────────
+        if _is_referee_or_mod(ctx.author):
+            await _record_verified_result(
+                ctx=ctx,
+                winner=winner,
+                loser=loser,
+                is_draw=is_draw,
                 game_name=game_name_resolved,
-                bet_amount=bet,
-                is_draw=False,
+                can_draw=game_can_draw,
+                bet=bet,
+                player1=player1,
+                player2=player2,
+                verified_by_referee=True,
             )
+            embed = _build_result_embed(
+                winner, loser, is_draw, game_name_resolved, bet, emoji,
+                footer=f"Verified by {ctx.author.display_name}"
+            )
+            if is_draw:
+                embed.add_field(
+                    name="Players",
+                    value=f"{player1.mention} vs {player2.mention}",
+                    inline=False,
+                )
+            await ctx.send(embed=embed)
+            return
 
-        embed = discord.Embed(
-            title=f"Result Verified — {game_name_resolved}",
-            color=discord.Color.green(),
+        # ── Regular player path — mutual confirmation ─────────
+        if ctx.author != player1 and ctx.author != player2:
+            await ctx.send("❌ You can't verify a game that wasn't played by you.")
+
+        if is_draw:
+            result_desc = "**Draw**"
+        else:
+            result_desc = f"**{winner.mention}** wins vs **{loser.mention}**"
+
+        bet_str = f"\n**Bet:** {fmt_currency(bet, emoji)}" if bet > 0 else ""
+
+        confirm_embed = discord.Embed(
+            title=f"📋 Result Verification — {game_name_resolved}",
+            description=(
+                f"{ctx.author.mention} is requesting to record a result.\n\n"
+                f"**Result:** {result_desc}{bet_str}\n\n"
+                f"Both players must confirm for this to be recorded."
+            ),
+            color=discord.Color.blurple(),
         )
-        embed.add_field(name="Winner", value=winner.mention, inline=True)
-        embed.add_field(name="Loser",  value=loser.mention,  inline=True)
-        if bet > 0:
-            embed.add_field(name="Bet", value=fmt_currency(bet, emoji), inline=False)
-        embed.set_footer(text=f"Verified by {ctx.author.display_name}")
-        await ctx.send(embed=embed)
+        confirm_embed.add_field(
+            name="Confirmations",
+            value=f"⬜ {player1.mention}\n⬜ {player2.mention}",
+            inline=False,
+        )
+        confirm_embed.set_footer(text="Expires in 2 minutes")
 
-        if bonuses:
-            bonus_lines = []
-            for uid, amount in bonuses.items():
-                member = ctx.guild.get_member(uid)
-                name = member.mention if member else f"<@{uid}>"
-                bonus_lines.append(f"{name} earned a class bonus of {fmt_currency(amount, emoji)}!")
-            await ctx.send("\n".join(bonus_lines))
+        view = MutualVerifyView(
+            player1=player1,
+            player2=player2,
+            ctx=ctx,
+            winner=winner,
+            loser=loser,
+            is_draw=is_draw,
+            game_name=game_name_resolved,
+            can_draw=game_can_draw,
+            bet=bet,
+        )
+        msg = await ctx.send(
+            content=f"{player1.mention} {player2.mention}",
+            embed=confirm_embed,
+            view=view,
+        )
+        view.message = msg
 
     # ── .erase-result ─────────────────────────────────────────
 

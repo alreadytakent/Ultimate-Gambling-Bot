@@ -204,32 +204,67 @@ class Economy(commands.Cog):
     @commands.command(name="lb", aliases=["leaderboard"])
     @channel_only("economy")
     async def lb(self, ctx: commands.Context):
-        """Show the richest players on the server."""
+        """Show the richest players on the server (paginated, 10 per page)."""
         settings = await db.get_guild_settings(ctx.guild.id)
         emoji  = settings["currency_emoji"]
 
-        players = await db.get_leaderboard(ctx.guild.id, limit=10)
+        players = await db.get_leaderboard(ctx.guild.id)
         if not players:
             await ctx.send("📭 No players have joined the season yet!")
             return
 
-        embed = discord.Embed(
-            title=f"🏆 Richest Players — Season {settings['current_season']}",
-            color=discord.Color.gold(),
+        # Find the author's rank (1-based); None if not in the list
+        author_rank = next(
+            (i + 1 for i, p in enumerate(players) if p["user_id"] == ctx.author.id),
+            None,
         )
-        lines  = []
-        medals = ["🥇", "🥈", "🥉"]
-        for i, p in enumerate(players):
-            member = ctx.guild.get_member(p["user_id"])
-            name   = member.display_name if member else f"User {p['user_id']}"
-            medal  = medals[i] if i < 3 else f"`{i+1}.`"
-            balance_str = fmt_currency(p["balance"], emoji)
-            class_str   = f"*{p['class']} Lv.{p['class_level']}*" if p["class"] else ""
-            lines.append(f"{medal} **{name}** — {balance_str}  {class_str}")
 
-        embed.description = "\n".join(lines)
-        embed.set_footer(text="Use .bal @player to check someone's balance")
-        await ctx.send(embed=embed)
+        medals = ["🥇", "🥈", "🥉"]
+        per_page = 10
+        total_pages = max(1, (len(players) + per_page - 1) // per_page)
+
+        def _ordinal(n: int) -> str:
+            if 11 <= (n % 100) <= 13:
+                return f"{n}th"
+            return f"{n}{['th','st','nd','rd','th'][min(n % 10, 4)]}"
+
+        def _make_page(page_index: int) -> discord.Embed:
+            start = page_index * per_page
+            chunk = players[start: start + per_page]
+
+            lines = []
+            for i, p in enumerate(chunk):
+                global_rank = start + i + 1
+                member = ctx.guild.get_member(p["user_id"])
+                name   = member.display_name if member else f"User {p['user_id']}"
+                medal  = medals[global_rank - 1] if global_rank <= 3 else f"`{global_rank}.`"
+                balance_str = fmt_currency(p["balance"], emoji)
+                class_str   = f"*{p['class']} Lv.{p['class_level']}*" if p["class"] else ""
+                lines.append(f"{medal} **{name}** — {balance_str}  {class_str}")
+
+            rank_str = (
+                f"Your rank: {_ordinal(author_rank)}"
+                if author_rank is not None
+                else "You haven't joined the season"
+            )
+            footer = f"Page {page_index + 1}/{total_pages} • {rank_str}"
+
+            embed = discord.Embed(
+                title=f"Leaderboard — Season {settings['current_season']}",
+                description="\n".join(lines),
+                color=discord.Color.gold(),
+            )
+            embed.set_footer(text=footer)
+            return embed
+
+        pages = [_make_page(i) for i in range(total_pages)]
+
+        if len(pages) == 1:
+            await ctx.send(embed=pages[0])
+        else:
+            from cogs.utils import PaginatedView
+            view = PaginatedView(pages, author_id=ctx.author.id)
+            await ctx.send(embed=pages[0], view=view)
 
     # ── .deposit ─────────────────────────────────────────────
 

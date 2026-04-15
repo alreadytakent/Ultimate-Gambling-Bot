@@ -415,17 +415,26 @@ async def set_balance(user_id: int, guild_id: int, amount: int) -> None:
         await db.commit()
 
 
-async def get_leaderboard(guild_id: int, limit: int = 10) -> list[dict]:
+async def get_leaderboard(guild_id: int, limit: Optional[int] = None) -> list[dict]:
     async with aiosqlite.connect(PLAYERS_DB) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("""
-            SELECT user_id, balance, class, class_level
-            FROM players
-            WHERE guild_id = ?
-            ORDER BY balance DESC
-            LIMIT ?
-        """, (guild_id, limit)) as cur:
-            rows = await cur.fetchall()
+        if limit is not None:
+            async with db.execute("""
+                SELECT user_id, balance, class, class_level
+                FROM players
+                WHERE guild_id = ?
+                ORDER BY balance DESC
+                LIMIT ?
+            """, (guild_id, limit)) as cur:
+                rows = await cur.fetchall()
+        else:
+            async with db.execute("""
+                SELECT user_id, balance, class, class_level
+                FROM players
+                WHERE guild_id = ?
+                ORDER BY balance DESC
+            """, (guild_id,)) as cur:
+                rows = await cur.fetchall()
     return [dict(r) for r in rows]
 
 

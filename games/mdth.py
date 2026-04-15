@@ -129,15 +129,19 @@ class MDTHGame(BaseGame):
 
         self.dropped_number = number
 
+        # Snapshot and claim pending_check BEFORE yielding to the event loop.
+        pending = self.pending_check
+        if pending is not None:
+            self.pending_check = None
+
         if message:
             try:
                 await message.add_reaction('✅')
             except Exception:
                 pass
 
-        if self.pending_check is not None:
-            _, check_time = self.pending_check
-            self.pending_check = None
+        if pending is not None:
+            _, check_time = pending
             return await self._resolve_round(check_time)
 
         return None
@@ -169,13 +173,16 @@ class MDTHGame(BaseGame):
             await self.dm_player(member, f"❌ Check time must be between 1 and {max_n} seconds!")
             return None
 
+        # Snapshot dropped_number BEFORE yielding to the event loop.
+        already_dropped = self.dropped_number
+
         if message:
             try:
                 await message.add_reaction('✅')
             except Exception:
                 pass
 
-        if self.dropped_number is not None:
+        if already_dropped is not None:
             return await self._resolve_round(check_time)
 
         self.pending_check = (member, check_time)

@@ -60,7 +60,7 @@ class Help(commands.Cog):
 
         embed.add_field(name="🎮 Games", value=(
             f"`{prefix}dth` `{prefix}mdth` `{prefix}gops` `{prefix}dotty` "
-            f"`{prefix}comb` `{prefix}airpoker` `{prefix}contr` `{prefix}kb` `{prefix}kod` `{prefix}cancel`"
+            f"`{prefix}comb` `{prefix}airpoker` `{prefix}contr` `{prefix}kb` `{prefix}kod` `{prefix}cancel` `{prefix}verify`"
         ), inline=False)
 
         embed.add_field(name="📊 Stats", value=(
@@ -78,7 +78,7 @@ class Help(commands.Cog):
 
         if is_referee or is_mod:
             embed.add_field(name="🛡️ Referee / Mod", value=(
-                f"`{prefix}verify` `{prefix}erase-result` `{prefix}tournament-advance`"
+                f"`{prefix}erase-result` `{prefix}tournament-advance`"
             ), inline=False)
 
         if is_mod:

@@ -130,17 +130,22 @@ class DTHGame(BaseGame):
 
         self.dropped_number = number
 
-        # React to the DM message
+        # Snapshot pending_check BEFORE the await so the coroutine
+        # can't read a value that belongs to a future round if another
+        # DM is processed while add_reaction is in flight.
+        pending = self.pending_check
+        if pending is not None:
+            self.pending_check = None   # claim it now, before yielding
+
         if message:
             try:
                 await message.add_reaction('✅')
             except Exception:
                 pass
 
-        # If checker already submitted, resolve immediately
-        if self.pending_check is not None:
-            _, check_time = self.pending_check
-            self.pending_check = None
+        # If checker had already submitted, resolve immediately
+        if pending is not None:
+            _, check_time = pending
             return await self._resolve_round(check_time)
 
         return None
@@ -172,7 +177,11 @@ class DTHGame(BaseGame):
             await self.dm_player(member, f"❌ Check time must be between 1 and {max_n} seconds!")
             return None
 
-        # React to the DM message
+        # Snapshot dropped_number BEFORE the await. If the dropper's
+        # _handle_drop coroutine resumes during add_reaction and resets
+        # dropped_number, we'd otherwise miss or double-resolve.
+        already_dropped = self.dropped_number
+
         if message:
             try:
                 await message.add_reaction('✅')
@@ -180,7 +189,7 @@ class DTHGame(BaseGame):
                 pass
 
         # If dropper already submitted, resolve immediately
-        if self.dropped_number is not None:
+        if already_dropped is not None:
             return await self._resolve_round(check_time)
 
         # Store pending check
