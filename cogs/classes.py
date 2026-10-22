@@ -320,27 +320,27 @@ class Classes(commands.Cog):
         embed.add_field(name="🗡️ Assassin",
             value=(
                 "Gets a new target every day at 00:00 UTC. Defeating your target earns a bonus.\n"
-                "Lv1: +2% | Lv2: +4% | Lv3: +6% | Lv4: +8% of your **balance**"
+                "Lv1: +6% | Lv2: +12% | Lv3: +20% | Lv4: +25% of your **balance**"
             ), inline=False)
 
         embed.add_field(name="🎲 Specialist",
             value=(
                 "Gets a daily game objective at 00:00 UTC. Winning that game earns a bonus.\n"
-                "Lv1: +5% | Lv2: +10% | Lv3: +15% | Lv4: +20% of your **bet**"
+                "Lv1: +50% | Lv2: +100% | Lv3: +150% | Lv4: +200% of your **bet**"
             ), inline=False)
 
         embed.add_field(name="💰 Collector",
             value=(
                 "Use `.collect` once every 24h to earn free carats.\n"
-                "Lv1: +1% | Lv2: +2% | Lv3: +3% | Lv4: +4% of your **balance**"
+                "Lv1: +3% | Lv2: +6% | Lv3: +9% | Lv4: +12% of your **balance**"
             ), inline=False)
 
         embed.add_field(name="⚔️ Berserker",
             value=(
                 "Earn bonus carats for consecutive wins (resets on loss/draw).\n"
-                "**2nd win:** Lv1: +1% | Lv2: +2% | Lv3: +3% | Lv4: +4%\n"
-                "**3rd win:** Lv1: +2% | Lv2: +4% | Lv3: +6% | Lv4: +8%\n"
-                "**4th+ win:** Lv1: +3% | Lv2: +6% | Lv3: +9% | Lv4: +12% of your **bet**"
+                "**2nd win:** Lv1: +10% | Lv2: +20% | Lv3: +30% | Lv4: +40%\n"
+                "**3rd win:** Lv1: +20% | Lv2: +40% | Lv3: +60% | Lv4: +80%\n"
+                "**4th+ win:** Lv1: +40% | Lv2: +80% | Lv3: +120% | Lv4: +160% of your **bet**"
             ), inline=False)
 
         embed.set_footer(text="Level up costs: Lv1→2: 250k | Lv2→3: 3M | Lv3→4: 6M")

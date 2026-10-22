@@ -11,7 +11,7 @@ from discord.ext import commands
 from typing import Optional
 
 import database as db
-from cogs.utils import require_player, PaginatedView
+from cogs.utils import require_player, PlainPaginatedView
 
 
 async def _build_score_table(rows: list[dict], guild_id: int) -> str:
@@ -37,8 +37,6 @@ async def _build_score_table(rows: list[dict], guild_id: int) -> str:
         name = r["game_name"]
         if len(name) > name_col:
             name = name[:name_col - 1] + "…"
-        # Show "-" for draws in games that cannot draw.
-        # Unknown games (not in guild list) default to showing the number.
         can_draw = can_draw_map.get(r["game_name"].lower(), True)
         draws_str = f"{r['draws']:>4}" if can_draw else f"{'-':>4}"
         lines.append(
@@ -51,7 +49,7 @@ async def _build_score_table(rows: list[dict], guild_id: int) -> str:
     lines.append("─" * (name_col + 15))
     lines.append(f"{'TOTAL':<{name_col}} {total_w:>4} {total_d:>4} {total_l:>4}")
 
-    return "```\n" + "\n".join(lines) + "\n```"
+    return "\n".join(lines)
 
 
 async def _build_h2h_table(rows: list[dict], guild_id: int) -> str:
@@ -78,7 +76,7 @@ async def _build_h2h_table(rows: list[dict], guild_id: int) -> str:
     total_l = sum(r["losses"] for r in rows)
     lines.append("─" * (name_col + 15))
     lines.append(f"{'TOTAL':<{name_col}} {total_w:>4} {total_d:>4} {total_l:>4}")
-    return "```\n" + "\n".join(lines) + "\n```"
+    return "\n".join(lines)
 
 
 class Score(commands.Cog):
@@ -95,15 +93,12 @@ class Score(commands.Cog):
           .score @player        — another player's score
           .score @p1 vs @p2    — head-to-head between two players
         """
-        # ── Parse args ──────────────────────────────────────
         mentions = ctx.message.mentions
 
-        # Head-to-head: .score @p1 vs @p2
         if args and " vs " in args.lower() and len(mentions) == 2:
             await self._head_to_head(ctx, mentions[0], mentions[1])
             return
 
-        # Single player (or self)
         target = mentions[0] if mentions else ctx.author
         await self._player_score(ctx, target)
 
@@ -116,38 +111,31 @@ class Score(commands.Cog):
             await ctx.send(f"❌ {who} joined the season yet.")
             return
 
-        # Most-recent season first
         seasons_with_data = list(reversed(await db.get_seasons_played(ctx.guild.id)))
         total_pages = len(seasons_with_data) + 1
 
-        pages: list[discord.Embed] = []
+        pages: list[str] = []
 
-        # Page 1: Overall
         overall = await db.get_score_overall(member.id, ctx.guild.id)
-        page1 = discord.Embed(
-            title=f"📊 {member.display_name}'s Score — Overall",
-            description=await _build_score_table(overall, ctx.guild.id),
-            color=discord.Color.blurple(),
+        table = await _build_score_table(overall, ctx.guild.id)
+        pages.append(
+            f"📊 **{member.display_name}'s Score — Overall** (1/{total_pages})\n"
+            f"```\n{table}\n```"
         )
-        page1.set_footer(text=f"Page 1 / {total_pages} — use ◀ ▶ to navigate seasons")
-        pages.append(page1)
 
-        # One page per season, most recent first
         for i, season_num in enumerate(seasons_with_data, start=2):
             season_rows = await db.get_score_by_season(member.id, ctx.guild.id, season_num)
-            page = discord.Embed(
-                title=f"📊 {member.display_name}'s Score — Season {season_num}",
-                description=await _build_score_table(season_rows, ctx.guild.id),
-                color=discord.Color.blurple(),
+            table = await _build_score_table(season_rows, ctx.guild.id)
+            pages.append(
+                f"📊 **{member.display_name}'s Score — Season {season_num}** ({i}/{total_pages})\n"
+                f"```\n{table}\n```"
             )
-            page.set_footer(text=f"Page {i} / {total_pages} — use ◀ ▶ to navigate seasons")
-            pages.append(page)
 
         if len(pages) == 1:
-            await ctx.send(embed=pages[0])
+            await ctx.send(pages[0])
         else:
-            view = PaginatedView(pages, author_id=ctx.author.id)
-            await ctx.send(embed=pages[0], view=view)
+            view = PlainPaginatedView(pages, author_id=ctx.author.id)
+            await ctx.send(pages[0], view=view)
 
     # ── Head-to-head ─────────────────────────────────────────
 
@@ -155,20 +143,18 @@ class Score(commands.Cog):
                              p1: discord.Member, p2: discord.Member):
         rows = await db.get_head_to_head(p1.id, p2.id, ctx.guild.id)
 
-        embed = discord.Embed(
-            title=f"⚔️ Head-to-Head: {p1.display_name} vs {p2.display_name}",
-            color=discord.Color.red(),
-        )
-
         if not rows:
-            embed.description = "*These two players have never played each other.*"
-        else:
-            embed.description = await _build_h2h_table(rows, ctx.guild.id)
-            embed.set_footer(
-                text=f"W/D/L from {p1.display_name}'s perspective | All seasons"
+            await ctx.send(
+                f"⚔️ **{p1.display_name} vs {p2.display_name}**\n"
+                f"*These two players have never played each other.*"
             )
+            return
 
-        await ctx.send(embed=embed)
+        table = await _build_h2h_table(rows, ctx.guild.id)
+        await ctx.send(
+            f"⚔️ **{p1.display_name} vs {p2.display_name}** — W/D/L from {p1.display_name}'s perspective\n"
+            f"```\n{table}\n```"
+        )
 
 
 async def setup(bot: commands.Bot) -> None:

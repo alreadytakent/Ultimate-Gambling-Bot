@@ -40,6 +40,7 @@ async def init_all_databases(default_shop_items: list[dict]) -> None:
     await _init_economy_db(default_shop_items)
     await _init_results_db()
     await _init_sessions_db()
+    await _migrate_guild_games()
 
 
 async def _init_server_db() -> None:
@@ -212,6 +213,47 @@ async def _init_sessions_db() -> None:
                 bet_amount    INTEGER NOT NULL DEFAULT 0
             )
         """)
+        await db.commit()
+
+
+
+async def _migrate_guild_games() -> None:
+    """
+    Startup migration: ensure every existing guild's game list contains all
+    entries from DEFAULT_GUILD_GAMES.  New games added to the defaults (e.g.
+    Labyrinth) are appended to any guild that is missing them.  Existing
+    entries are never removed or modified, so per-guild customisations are
+    preserved.
+    """
+    import config as _cfg
+    default_games = _cfg.DEFAULT_GUILD_GAMES   # list[dict]
+
+    async with aiosqlite.connect(SERVER_DB) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT guild_id, guild_games FROM guilds") as cur:
+            rows = await cur.fetchall()
+
+        for row in rows:
+            guild_id   = row["guild_id"]
+            raw        = row["guild_games"] or "[]"
+            try:
+                games: list[dict] = json.loads(raw)
+            except Exception:
+                games = []
+
+            existing_aliases = {g["alias"].lower() for g in games}
+            added = False
+            for default in default_games:
+                if default["alias"].lower() not in existing_aliases:
+                    games.append(default)
+                    added = True
+
+            if added:
+                await db.execute(
+                    "UPDATE guilds SET guild_games = ? WHERE guild_id = ?",
+                    (json.dumps(games), guild_id),
+                )
+
         await db.commit()
 
 

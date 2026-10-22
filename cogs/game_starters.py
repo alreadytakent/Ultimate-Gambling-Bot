@@ -31,6 +31,7 @@ from games.airpoker import AirPokerGame
 from games.contradiction import ContradictionGame
 from games.knucklebones import KnuckleBonesGame
 from games.kod import KODGame
+from games.labyrinth import LabyrinthGame
 
 CHALLENGE_TIMEOUT = 60  # seconds before a challenge expires
 
@@ -459,6 +460,18 @@ class Games(commands.Cog):
             await ctx.send("❌ Invalid bet amount. Examples: `5000`, `1e6`, `2.5e3`")
             return
         await _send_challenge(ctx, opponent, KnuckleBonesGame, bet)
+
+    # ── Labyrinth ────────────────────────────────────────────
+    @commands.command(name="lab")
+    @channel_only("games")
+    @require_player()
+    async def lab(self, ctx: commands.Context, opponent: discord.Member, raw_bet: str = "0"):
+        """Challenge someone to a game of Labyrinth. Both players build a maze in DMs."""
+        bet = parse_amount(raw_bet)
+        if bet is None:
+            await ctx.send("❌ Invalid bet amount. Examples: `5000`, `1e6`, `2.5e3`")
+            return
+        await _send_challenge(ctx, opponent, LabyrinthGame, bet)
 
     # ── King of Diamonds (lobby) ─────────────────────────────
     @commands.command(name="kod")

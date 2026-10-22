@@ -60,7 +60,7 @@ class Help(commands.Cog):
 
         embed.add_field(name="🎮 Games", value=(
             f"`{prefix}dth` `{prefix}mdth` `{prefix}gops` `{prefix}dotty` "
-            f"`{prefix}comb` `{prefix}airpoker` `{prefix}contr` `{prefix}kb` `{prefix}kod` `{prefix}cancel` `{prefix}verify`"
+            f"`{prefix}comb` `{prefix}airpoker` `{prefix}contr` `{prefix}kb` `{prefix}kod` `{prefix}lab` `{prefix}cancel` `{prefix}verify`"
         ), inline=False)
 
         embed.add_field(name="📊 Stats", value=(

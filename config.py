@@ -37,24 +37,24 @@ CLASS_LEVELUP_COSTS = {
 }
 
 # Assassin: bonus % of balance per level on defeating target
-ASSASSIN_BONUS = {1: 0.02, 2: 0.04, 3: 0.06, 4: 0.08}
+ASSASSIN_BONUS = {1: 0.06, 2: 0.12, 3: 0.20, 4: 0.25}
 ASSASSIN_TARGET_INTERVAL_HOURS = 24
 
 # Specialist: bonus % of bet per level on completing daily objective
-SPECIALIST_BONUS = {1: 0.05, 2: 0.10, 3: 0.15, 4: 0.20}
+SPECIALIST_BONUS = {1: 0.50, 2: 1.0, 3: 1.5, 4: 2.0}
 SPECIALIST_INTERVAL_HOURS = 24     # how often a new objective is assigned
 
 # Collector: % of balance earned per level on .collect
-COLLECTOR_BONUS = {1: 0.01, 2: 0.02, 3: 0.03, 4: 0.04}
+COLLECTOR_BONUS = {1: 0.03, 2: 0.06, 3: 0.09, 4: 0.12}
 COLLECTOR_COOLDOWN_HOURS = 24
 
 # Berserker: bonus % of bet per consecutive win tier, per level
 # Structure: {level: [2nd_win_bonus, 3rd_win_bonus, 4th+_win_bonus]}
 BERSERKER_BONUS = {
-    1: [0.01, 0.02, 0.03],
-    2: [0.02, 0.04, 0.06],
-    3: [0.03, 0.06, 0.09],
-    4: [0.04, 0.08, 0.12],
+    1: [0.10, 0.20, 0.40],
+    2: [0.20, 0.40, 0.80],
+    3: [0.30, 0.60, 1.20],
+    4: [0.40, 0.80, 1.60],
 }
 
 # --- Games ---
@@ -68,6 +68,7 @@ GAME_NAMES = [
     "Contradiction",
     "Knucklebones",
     "King of Diamonds",
+    "Labyrinth",
 ]
 
 # Maps command aliases → canonical game name
@@ -81,10 +82,11 @@ GAME_ALIASES = {
     "contr":    "Contradiction",
     "kb":       "Knucklebones",
     "kod":      "King of Diamonds",
+    "lab":      "Labyrinth",
 }
 
 # Games that can produce a draw
-GAMES_WITH_DRAWS = {"Game of Pure Strategy", "Air Poker", "King of Diamonds", "Knucklebones"}
+GAMES_WITH_DRAWS = {"Game of Pure Strategy", "Air Poker", "King of Diamonds", "Knucklebones", "Labyrinth"}
 
 # Default per-guild game list (used when a guild hasn't customised theirs).
 # Each entry: {"full_name": str, "alias": str, "can_draw": bool}

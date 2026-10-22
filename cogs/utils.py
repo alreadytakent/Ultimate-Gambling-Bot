@@ -176,9 +176,53 @@ class PaginatedView(discord.ui.View):
             item.disabled = True
 
 
-# ════════════════════════════════════════════════════════════
+class PlainPaginatedView(discord.ui.View):
+    """
+    Like PaginatedView but for plain-text (non-embed) messages.
+    Pages are plain strings; navigation edits the message content.
+    """
+
+    def __init__(self, pages: list[str], author_id: int, timeout: float = 120.0):
+        super().__init__(timeout=timeout)
+        self.pages = pages
+        self.current = 0
+        self.author_id = author_id
+        self._update_buttons()
+
+    def _update_buttons(self):
+        self.prev_button.disabled = self.current == 0
+        self.next_button.disabled = self.current == len(self.pages) - 1
+
+    async def _update(self, interaction: discord.Interaction):
+        self._update_buttons()
+        await interaction.response.edit_message(
+            content=self.pages[self.current], view=self
+        )
+
+    @discord.ui.button(label="◄", style=discord.ButtonStyle.secondary)
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ This isn't your scoreboard.", ephemeral=True)
+            return
+        self.current -= 1
+        await self._update(interaction)
+
+    @discord.ui.button(label="►", style=discord.ButtonStyle.secondary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ This isn't your scoreboard.", ephemeral=True)
+            return
+        self.current += 1
+        await self._update(interaction)
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
+
+# ════════════════════════════════════════════════════════
 #  CONFIRMATION VIEW (for dangerous mod commands)
-# ════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════
 
 # Keep old name as an alias so any external references don't break.
 DoubleConfirmView = None   # replaced below; reassigned after class definition

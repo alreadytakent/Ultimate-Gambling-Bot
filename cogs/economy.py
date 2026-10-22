@@ -46,41 +46,29 @@ class Economy(commands.Cog):
 
             settings = await db.get_guild_settings(guild.id)
             emoji  = settings["currency_emoji"]
-            name_s = settings["currency_name"]
-            name_p = settings["currency_name_plural"]
-
-            # Find a notification channel
-            notif_channel = None
-            restricted_id = await db.get_channel_restriction(guild.id, "economy")
-            if restricted_id:
-                notif_channel = guild.get_channel(restricted_id)
-            if not notif_channel:
-                notif_channel = next(
-                    (c for c in guild.text_channels
-                     if c.permissions_for(guild.me).send_messages),
-                    None
-                )
 
             for dep in deposits:
                 user_id = dep["user_id"]
-                member  = guild.get_member(user_id)
+                member = guild.get_member(user_id)
                 if member is None:
                     await db.delete_deposit(user_id, guild.id)
                     continue
 
-                interest     = int(dep["amount"] * dep["interest_rate"])
+                interest = int(dep["amount"] * dep["interest_rate"])
                 total_return = dep["amount"] + interest
 
                 await db.update_balance(user_id, guild.id, total_return)
                 await db.delete_deposit(user_id, guild.id)
 
-                if notif_channel:
-                    await notif_channel.send(
-                        f"🏦 {member.mention} Your deposit has matured! "
+                try:
+                    await member.send(
+                        f"🏦 Your deposit has matured! "
                         f"You received {fmt_currency(total_return, emoji)} "
                         f"({fmt_currency(dep['amount'], emoji)} + "
-                        f"{dep['interest_rate']*100:.1f}% interest)."
+                        f"{dep['interest_rate'] * 100:.1f}% interest)."
                     )
+                except discord.Forbidden:
+                    pass
 
     # ── .bal ─────────────────────────────────────────────────
 
@@ -174,29 +162,27 @@ class Economy(commands.Cog):
     @channel_only("economy")
     @require_player()
     async def work(self, ctx: commands.Context):
-        """Earn carats. Can only be used once per cooldown period."""
-        settings         = await db.get_guild_settings(ctx.guild.id)
+        """Collect accumulated carats based on time since last work."""
+        settings = await db.get_guild_settings(ctx.guild.id)
         cooldown_minutes = settings["work_cooldown_minutes"]
-        work_amount      = settings["work_amount"]
-        emoji  = settings["currency_emoji"]
+        work_amount = settings["work_amount"]
+        emoji = settings["currency_emoji"]
 
+        now = datetime.utcnow()
+        cooldown_seconds = cooldown_minutes * 60
         last_work = await db.get_last_work(ctx.author.id, ctx.guild.id)
-        if last_work is not None:
-            next_work = last_work + timedelta(minutes=cooldown_minutes)
-            now = datetime.utcnow()
-            if now < next_work:
-                remaining = next_work - now
-                hours, remainder = divmod(int(remaining.total_seconds()), 3600)
-                minutes, seconds = divmod(remainder, 60)
-                time_str = f"{hours}h {minutes}m {seconds}s" if hours else f"{minutes}m {seconds}s"
-                await ctx.send(f"⏳ You already worked recently. Try again in **{time_str}**.")
-                return
 
-        await db.update_balance(ctx.author.id, ctx.guild.id, work_amount)
+        if last_work is not None:
+            elapsed_seconds = (now - last_work).total_seconds()
+            earned = max(1, int(work_amount * elapsed_seconds / cooldown_seconds))
+        else:
+            earned = work_amount
+
+        await db.update_balance(ctx.author.id, ctx.guild.id, earned)
         await db.set_last_work(ctx.author.id, ctx.guild.id)
         await ctx.send(
             f"💼 {ctx.author.mention} worked hard and earned "
-            f"{fmt_currency(work_amount, emoji)}!"
+            f"{fmt_currency(earned, emoji)}!"
         )
 
     # ── .lb ──────────────────────────────────────────────────
