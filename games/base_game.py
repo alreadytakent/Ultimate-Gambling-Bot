@@ -24,6 +24,7 @@ class GameResult:
     loser_id: Optional[int]  # None if draw or FFA with many losers
     is_draw: bool
     loser_ids: list[int] = field(default_factory=list)  # for FFA games
+    draw_ids: list[int] = field(default_factory=list)   # for FFA games: players who share a draw
 
 
 class BaseGame(abc.ABC):

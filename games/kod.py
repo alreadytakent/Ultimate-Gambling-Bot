@@ -34,6 +34,7 @@ class KODGame(BaseGame):
         self.round = 1
         self.hp: dict[int, int] = {p.id: 5 for p in self.players}
         self.eliminated: set[int] = set()
+        self.resigned: set[int] = set()   # players who left via .resign
 
         # Current round state
         self.current_numbers: dict[int, Optional[int]] = {p.id: None for p in self.players}
@@ -205,18 +206,9 @@ class KODGame(BaseGame):
 
         if len(remaining_players) <= 1:
             await self.send(msg)
-            if len(remaining_players) == 1:
-                winner = remaining_players[0]
-                loser_ids = [p.id for p in self.players if p.id != winner.id]
-                return GameResult(
-                    winner_id=winner.id,
-                    loser_id=loser_ids[0] if len(loser_ids) == 1 else None,
-                    is_draw=False,
-                    loser_ids=loser_ids,
-                )
-            else:
-                # Everyone eliminated simultaneously — draw
-                return GameResult(winner_id=None, loser_id=None, is_draw=True)
+            # Everyone who was alive at the start of this round and is dead now
+            # (only possible when nobody survives) shares a draw.
+            return self._final_result([p.id for p in active_players])
 
         # ── Prepare next round ────────────────────────────────
         self.round += 1
@@ -342,19 +334,64 @@ class KODGame(BaseGame):
 
         remaining = [p for p in self.players if p.id not in self.eliminated]
         if len(remaining) <= 1:
-            if len(remaining) == 1:
-                winner = remaining[0]
-                loser_ids = [p.id for p in self.players if p.id != winner.id]
-                return GameResult(
-                    winner_id=winner.id,
-                    loser_id=loser_ids[0] if len(loser_ids) == 1 else None,
-                    is_draw=False,
-                    loser_ids=loser_ids,
-                )
-            else:
-                return GameResult(winner_id=None, loser_id=None, is_draw=True)
+            return self._final_result([timed_out_user_id])
 
         return None
+
+    # ── Resign ────────────────────────────────────────────────
+
+    async def resign(self, user_id: int) -> Optional[GameResult]:
+        """
+        A player leaves the game: they lose and are removed from play,
+        but the game continues with the remaining players.
+        """
+        if user_id in self.eliminated:
+            return None
+        member = self.get_member(user_id)
+        name = member.display_name if member else f"<@{user_id}>"
+
+        self.eliminated.add(user_id)
+        self.resigned.add(user_id)
+        self.hp[user_id] = 0
+        if user_id in self.awaiting:
+            self.awaiting.remove(user_id)
+        self.current_numbers[user_id] = None
+
+        await self.send(f"🏳️ **{name}** resigned and is out of the game!")
+
+        remaining = [p for p in self.players if p.id not in self.eliminated]
+        if len(remaining) <= 1:
+            return self._final_result([user_id])
+
+        # The resigning player was the last one we were waiting for
+        if len(self.awaiting) == 0:
+            return await self._resolve_round()
+        return None
+
+    # ── Final result ──────────────────────────────────────────
+
+    def _final_result(self, last_round_ids: list[int]) -> GameResult:
+        """
+        One survivor → winner, everybody else loses.
+        No survivors → the players who died in the final round draw;
+        everyone who died earlier (incl. resigned/timed out) is a loser.
+        """
+        alive = [p for p in self.players if p.id not in self.eliminated]
+        if len(alive) == 1:
+            winner = alive[0]
+            loser_ids = [p.id for p in self.players if p.id != winner.id]
+            return GameResult(
+                winner_id=winner.id,
+                loser_id=loser_ids[0] if len(loser_ids) == 1 else None,
+                is_draw=False,
+                loser_ids=loser_ids,
+            )
+        draw_ids = list(last_round_ids)
+        loser_ids = [p.id for p in self.players if p.id not in draw_ids]
+        return GameResult(
+            winner_id=None, loser_id=None, is_draw=True,
+            loser_ids=loser_ids, draw_ids=draw_ids,
+        )
 
     # ── State persistence ─────────────────────────────────────
 
@@ -363,6 +400,7 @@ class KODGame(BaseGame):
             "round":            self.round,
             "hp":               {str(k): v for k, v in self.hp.items()},
             "eliminated":       list(self.eliminated),
+            "resigned":         list(self.resigned),
             "current_numbers":  {str(k): v for k, v in self.current_numbers.items()},
             "awaiting":         self.awaiting,
         }
@@ -371,5 +409,6 @@ class KODGame(BaseGame):
         self.round          = state.get("round", 1)
         self.hp             = {int(k): v for k, v in state.get("hp", {}).items()}
         self.eliminated     = set(state.get("eliminated", []))
+        self.resigned       = set(state.get("resigned", []))
         self.current_numbers = {int(k): v for k, v in state.get("current_numbers", {}).items()}
         self.awaiting       = state.get("awaiting", [p.id for p in self.players])
