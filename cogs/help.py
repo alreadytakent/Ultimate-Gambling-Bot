@@ -39,7 +39,7 @@ class Help(commands.Cog):
             member_is_ref = is_referee_or_mod(ctx.author)
 
         embed = discord.Embed(
-            title="📖 UltimateBot Commands",
+            title="📖 Referee-bot Commands",
             description=f"Use `{prefix}help <command>` for details on any command.",
             color=discord.Color.blurple(),
         )
@@ -54,6 +54,10 @@ class Help(commands.Cog):
             f"`{prefix}score` `{prefix}score @p1 vs @p2`"
         ), inline=False)
 
+        embed.add_field(name="ℹ️ Info", value=(
+            f"`{prefix}info` `{prefix}rules <game>`"
+        ), inline=False)
+
         if member_is_ref:
             embed.add_field(name="🛡️ Referee / Mod", value=f"`{prefix}erase-result`", inline=False)
 
@@ -63,7 +67,6 @@ class Help(commands.Cog):
                 f"`{prefix}add-game` `{prefix}remove-game` `{prefix}list-games`"
             ), inline=False)
 
-        embed.set_footer(text="UltimateBot Light • Play hard 🎲")
         await ctx.send(embed=embed)
 
 

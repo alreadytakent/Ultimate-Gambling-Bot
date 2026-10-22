@@ -62,6 +62,7 @@ class UltimateBot(commands.Bot):
             "cogs.score",
             "cogs.referee",
             "cogs.admin",
+            "cogs.info",
             "cogs.help",
         ]
         for cog in cogs:
